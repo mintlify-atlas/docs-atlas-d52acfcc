@@ -1,0 +1,63 @@
+---
+title: "Admin dashboard overview for LMArena Bridge"
+description: "The LMArena Bridge dashboard at /dashboard lets you manage auth tokens, API keys, monitor usage stats, and trigger token refreshes from a browser UI."
+---
+
+LMArena Bridge ships with a built-in admin dashboard at `http://localhost:8000/dashboard`. It provides a browser-based interface for all day-to-day operations: adding and removing LMArena auth tokens, creating API keys for your clients, viewing per-key usage statistics, and manually refreshing tokens when they expire.
+
+## Accessing the dashboard
+
+Navigate to `http://localhost:8000/dashboard` while the bridge is running. You'll be redirected to the login page if you haven't authenticated yet.
+
+<Steps>
+  <Step title="Open the dashboard">
+    Go to `http://localhost:8000/dashboard` in your browser.
+  </Step>
+  <Step title="Log in">
+    Enter your admin password. The default password is `admin`.
+
+    <Warning>
+      Change the default password before exposing the bridge to any network. Update `password` in `config.json` or change it through the dashboard settings.
+    </Warning>
+  </Step>
+  <Step title="Explore the sections">
+    The dashboard is divided into four main areas: Auth Tokens, API Keys, Usage Statistics, and Settings.
+  </Step>
+</Steps>
+
+## Dashboard sections
+
+### Auth tokens
+
+Displays all configured `arena-auth-prod-v1` tokens with their expiry status. From here you can:
+
+- **Add a token** — paste a new `arena-auth-prod-v1` cookie value
+- **Delete a token** — remove an expired or invalid token
+- **Refresh tokens** — trigger an immediate refresh attempt for expired tokens via LMArena HTTP or Supabase
+
+<Tip>
+  Add at least two tokens to enable round-robin rotation. The bridge automatically skips expired tokens and distributes requests across valid ones.
+</Tip>
+
+### API keys
+
+Lists all API keys that clients use to authenticate with the bridge. Each key shows its name, the key value, and its rate limit in requests per minute (RPM).
+
+- **Create key** — generates a cryptographically random key with a configurable name and RPM limit
+- **Delete key** — immediately revokes a key; any client using it will receive `401 Unauthorized`
+
+### Usage statistics
+
+Shows a chart of the top 10 most-used models across all API keys, plus per-key request counts. Statistics are stored in `config.json` under `usage_stats` and persist across restarts.
+
+### Settings
+
+Allows you to change the admin password and configure optional settings such as `prune_invalid_tokens` and `persist_arena_auth_cookie`.
+
+## Session management
+
+The dashboard uses a session cookie for authentication. Sessions are not persisted across bridge restarts — you'll need to log in again after restarting. The session timeout is controlled by the in-memory session store.
+
+<Info>
+  The dashboard is served at port 8000 alongside the API. In production, use a firewall rule or reverse proxy auth to restrict access to `/dashboard` and `/login` from public networks.
+</Info>

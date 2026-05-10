@@ -1,133 +1,64 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "LMArena Bridge: OpenAI-compatible API for LMArena models"
+description: "LMArena Bridge exposes an OpenAI-compatible API that proxies requests to LMArena, handling Cloudflare and reCAPTCHA challenges automatically."
 ---
 
-## Setting up
+LMArena Bridge is a self-hosted API server that lets you talk to LMArena models — including experimental stealth models — using the same OpenAI API format your existing tools already understand. Point any OpenAI-compatible client at `http://localhost:8000/api/v1` and start chatting immediately.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install LMArena Bridge and make your first API call in minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Authentication" icon="key" href="/authentication">
+    Get your LMArena auth token and configure it in the dashboard.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="API Reference" icon="code" href="/api/chat-completions">
+    Full documentation for every endpoint: chat, models, health, and more.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Integrations" icon="plug" href="/integrations/openwebui">
+    Connect LMArena Bridge to OpenWebUI and other OpenAI-compatible frontends.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## How it works
 
-Everything you need to create world-class documentation.
+LMArena Bridge runs a FastAPI server on `localhost:8000` that accepts standard OpenAI `/v1/chat/completions` requests and translates them into LMArena's internal API format. Because LMArena uses Cloudflare protection and reCAPTCHA v3/v2 challenges, the bridge automates a real browser session in the background to handle those checks transparently.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={2}>
+  <Card title="Transport overview" icon="network-wired" href="/transports/overview">
+    Learn how the bridge selects between direct httpx, Chrome, Camoufox, and userscript proxy transports.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Configuration" icon="sliders" href="/configuration/config-file">
+    Set auth tokens, API keys, rate limits, and browser window modes via config.json.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Production deployment" icon="server" href="/deployment/production">
+    Error handling, monitoring, security best practices, and debug mode.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Troubleshooting" icon="wrench" href="/deployment/troubleshooting">
+    Common errors and their solutions for token issues, timeouts, and image uploads.
   </Card>
-</Columns>
+</CardGroup>
 
-## Make your content agent ready
+## Key features
 
-Make your docs work for humans and AI agents alike.
+<AccordionGroup>
+  <Accordion title="OpenAI-compatible API">
+    Implements `POST /api/v1/chat/completions` and `GET /api/v1/models` with the same request and response shapes as the OpenAI API, including streaming via Server-Sent Events.
+  </Accordion>
+  <Accordion title="Multi-transport anti-bot handling">
+    Automatically switches between direct HTTP, headless Chrome, Firefox-based Camoufox, and a browser userscript proxy depending on the model and current challenge state.
+  </Accordion>
+  <Accordion title="Token rotation and auto-refresh">
+    Manages multiple `arena-auth-prod-v1` tokens in round-robin, detecting expiry and refreshing via LMArena HTTP or Supabase before requests fail.
+  </Accordion>
+  <Accordion title="Image upload support">
+    Accepts vision messages with base64-encoded images, uploads them to LMArena R2 storage, and includes the signed URLs in the request. Supports PNG, JPEG, GIF, WebP, and SVG up to 10 MB.
+  </Accordion>
+  <Accordion title="Admin dashboard">
+    A built-in web UI at `/dashboard` lets you manage auth tokens, create and revoke API keys, view per-key usage stats, and trigger manual token refreshes.
+  </Accordion>
+</AccordionGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Note>
+  LMArena actively deploys Cloudflare checkpoints, captchas, and reCAPTCHA Enterprise. The bridge works around these automatically, but reliability may vary as LMArena updates its defenses.
+</Note>

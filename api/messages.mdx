@@ -1,0 +1,157 @@
+---
+title: "POST /api/v1/messages — Anthropic-compatible endpoint"
+description: "POST /api/v1/messages accepts Anthropic Messages API requests and translates them to LMArena format, supporting streaming and multi-turn conversations."
+---
+
+LMArena Bridge implements `POST /api/v1/messages` as an Anthropic Messages API–compatible endpoint. This lets Anthropic-native clients — such as tools built with the Anthropic SDK, Cursor in Claude mode, or any app that calls the Anthropic API — route requests through LMArena without changing their client code.
+
+## Authentication
+
+<ParamField header="Authorization" type="string" required>
+  Bearer token. Pass the API key you created in the dashboard: `Authorization: Bearer <api_key>`. If no API keys are configured, omit the header or pass any value.
+</ParamField>
+
+## Request body
+
+<ParamField body="model" type="string" required>
+  Model ID. Use any model ID returned by [`GET /api/v1/models`](/api/models).
+</ParamField>
+
+<ParamField body="messages" type="object[]" required>
+  Array of message objects. Each must have a `role` (`"user"` or `"assistant"`) and a `content` field (string or array of content blocks).
+
+  <Expandable title="message object properties">
+    <ResponseField name="role" type="string" required>
+      `"user"` or `"assistant"`.
+    </ResponseField>
+    <ResponseField name="content" type="string | array" required>
+      The message text, or an array of content blocks. Only `type: "text"` blocks are forwarded to LMArena; other block types are ignored.
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="system" type="string">
+  Optional system prompt. Prepended as a `role: "system"` message before the conversation.
+</ParamField>
+
+<ParamField body="max_tokens" type="number">
+  Maximum tokens to generate. Passed through to the underlying chat completions handler.
+</ParamField>
+
+<ParamField body="stream" type="boolean" default="false">
+  When `true`, returns an Anthropic-format SSE stream with `message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`, and `message_stop` events.
+</ParamField>
+
+<ParamField body="temperature" type="number">
+  Sampling temperature. Passed through when provided.
+</ParamField>
+
+## How translation works
+
+The bridge converts the Anthropic request to OpenAI format internally, routes it through the same `chat/completions` pipeline, then converts the response back:
+
+- `system` → prepended `{"role": "system", "content": "..."}` message
+- Content blocks of `type: "text"` are joined with newlines into a single string
+- Streaming OpenAI SSE chunks are re-wrapped as Anthropic `content_block_delta` events
+
+<Note>
+  Image content blocks are not currently supported through this endpoint. To send images, use [`POST /api/v1/chat/completions`](/api/chat-completions) directly with the OpenAI vision format.
+</Note>
+
+## Example
+
+<CodeGroup>
+
+```bash Non-streaming
+curl -X POST http://localhost:8000/api/v1/messages \
+  -H "Authorization: Bearer your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-5-sonnet-20241022",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "user", "content": "What is the capital of France?"}
+    ]
+  }'
+```
+
+```bash Streaming
+curl -X POST http://localhost:8000/api/v1/messages \
+  -H "Authorization: Bearer your_api_key" \
+  -H "Content-Type: application/json" \
+  --no-buffer \
+  -d '{
+    "model": "claude-3-5-sonnet-20241022",
+    "max_tokens": 1024,
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "Explain quantum entanglement briefly."}
+    ]
+  }'
+```
+
+```bash With system prompt
+curl -X POST http://localhost:8000/api/v1/messages \
+  -H "Authorization: Bearer your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "system": "You are a helpful coding assistant.",
+    "max_tokens": 2048,
+    "messages": [
+      {"role": "user", "content": "Write a Python function to reverse a string."}
+    ]
+  }'
+```
+
+</CodeGroup>
+
+## Non-streaming response
+
+```json 200
+{
+  "id": "msg_01XFDUDYJgAACzvnptvVoYEL",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Paris is the capital of France."
+    }
+  ],
+  "model": "gpt-4o",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 14,
+    "output_tokens": 9
+  }
+}
+```
+
+## Streaming response events
+
+```text SSE stream
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_01XFD...","type":"message","role":"assistant","content":[],"model":"gpt-4o","stop_reason":null}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Paris"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_stop
+data: {"type":"message_stop"}
+```
+
+## Error responses
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Missing or invalid `model` or `messages` field. |
+| `401` | Missing or invalid API key. |
+| `429` | Rate limit exceeded for your API key. |
+| `503` | LMArena unavailable or bridge failed to acquire a token. |

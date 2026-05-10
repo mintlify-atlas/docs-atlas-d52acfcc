@@ -1,0 +1,149 @@
+---
+title: "Authenticate with LMArena Bridge"
+description: "Get your arena-auth-prod-v1 cookie from LMArena and add it to the bridge. Create API keys to authenticate your clients and set per-key rate limits."
+---
+
+LMArena Bridge uses two distinct layers of authentication: **LMArena auth tokens** that the bridge uses to talk to LMArena on your behalf, and **API keys** that your clients use to talk to the bridge. This page explains both.
+
+## LMArena auth tokens
+
+LMArena protects its API with a session cookie named `arena-auth-prod-v1`. The bridge reads this cookie from your browser, stores it in `config.json`, and attaches it to every upstream request it sends to LMArena.
+
+### Get your token
+
+<Steps>
+  <Step title="Log in to LMArena and send a message">
+    Open [arena.ai](https://arena.ai) or [lmarena.ai](https://lmarena.ai) in your browser and send at least one message. This ensures the auth cookie is written to your browser's cookie store.
+  </Step>
+
+  <Step title="Open developer tools">
+    Press **F12**, or right-click anywhere on the page and choose **Inspect**.
+  </Step>
+
+  <Step title="Find the cookie">
+    - **Chrome / Edge**: select the **Application** tab → expand **Cookies** in the left panel → click the LMArena domain.
+    - **Firefox**: select the **Storage** tab → expand **Cookies**.
+
+    Look for a cookie named `arena-auth-prod-v1`. Its value always starts with `base64-`.
+  </Step>
+
+  <Step title="Copy the token value">
+    Click the cookie row and copy the full value from the **Value** column. Do not trim or truncate it.
+
+    <Note>
+      Some browsers (or Google OAuth flows) split this cookie into `arena-auth-prod-v1.0` and `arena-auth-prod-v1.1`. If you see both, copy each value and paste them back-to-back before adding the token. The bridge also handles split cookies automatically when they arrive from a browser session it controls.
+    </Note>
+  </Step>
+
+  <Step title="Add the token in the dashboard">
+    Go to [http://localhost:8000/dashboard](http://localhost:8000/dashboard), log in, and paste the value into the **Auth Tokens** field. Click **Add Token**.
+
+    The dashboard shows each token's expiry time and current status. Expired tokens are highlighted so you know when to rotate them.
+  </Step>
+</Steps>
+
+### Multiple tokens and rotation
+
+You can add as many `arena-auth-prod-v1` tokens as you like. The bridge cycles through them in round-robin order, skipping tokens that have already expired.
+
+- **Round-robin selection** — `get_next_auth_token()` advances the pointer on each request and wraps back to the first token after the last one is used.
+- **Expiry detection** — Each token contains a JWT expiry claim. The bridge checks this before every request and skips expired tokens automatically.
+- **Auto-refresh** — The bridge attempts to refresh expired tokens via LMArena's HTTP API or Supabase before they are needed. You can also trigger a manual refresh from the dashboard.
+
+<Tip>
+  Adding two or three tokens from different browser sessions improves reliability. If one token expires mid-session or is rejected by Cloudflare, the bridge falls over to the next one without interrupting your request.
+</Tip>
+
+Tokens are stored in the `auth_tokens` list in `config.json`:
+
+```json
+{
+  "auth_tokens": [
+    "base64-eyJ...<token one>...",
+    "base64-eyJ...<token two>..."
+  ]
+}
+```
+
+### Cloudflare clearance cookie (optional)
+
+Some requests — especially to models behind stricter Cloudflare rules — benefit from a valid `cf_clearance` cookie. This cookie is issued by Cloudflare after a browser completes a challenge on the LMArena domain.
+
+To use it:
+
+1. Complete a Cloudflare challenge on [arena.ai](https://arena.ai) in your browser (this usually happens automatically when you visit the site).
+2. Open DevTools and copy the `cf_clearance` cookie value.
+3. Paste it into the **cf_clearance** field in the dashboard, or set it directly in `config.json`:
+
+```json
+{
+  "cf_clearance": "your-cf_clearance-value-here"
+}
+```
+
+<Note>
+  `cf_clearance` expires after a few hours. When it expires, the bridge falls back to its browser-automation transports (Chrome or Camoufox) to handle Cloudflare challenges in-process. Keeping it up to date reduces the number of browser sessions the bridge needs to open.
+</Note>
+
+---
+
+## API keys
+
+API keys control access to the bridge itself. Any client that calls `POST /api/v1/chat/completions` must present a valid API key in the `Authorization` header, unless you have configured the bridge to allow unauthenticated requests.
+
+### How API keys work
+
+Clients pass their key as a Bearer token:
+
+```bash
+curl http://localhost:8000/api/v1/chat/completions \
+  -H "Authorization: Bearer lmb-yourKeyHere" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hi"}]}'
+```
+
+The bridge validates the key against the `api_keys` list in `config.json`. Each key entry looks like this:
+
+```json
+{
+  "api_keys": [
+    {
+      "name": "My app",
+      "key": "lmb-yourKeyHere",
+      "rpm": 60,
+      "created": 1700000000
+    }
+  ]
+}
+```
+
+| Field     | Description                                                        |
+|-----------|--------------------------------------------------------------------|
+| `name`    | A human-readable label shown in the dashboard.                     |
+| `key`     | The secret key value clients include in the `Authorization` header. |
+| `rpm`     | Requests per minute allowed for this key. Default: `60`.           |
+| `created` | Unix timestamp when the key was created. Set automatically.        |
+
+### Creating and deleting keys
+
+Use the **API Keys** section of the dashboard at `http://localhost:8000/dashboard`. The dashboard auto-generates cryptographically secure key values. You can set a custom rate limit (RPM) per key, and delete keys that are no longer needed.
+
+<Tip>
+  Each key has its own rate limit. Create separate keys for separate applications or users so you can track and throttle usage independently.
+</Tip>
+
+---
+
+## Dashboard password
+
+The dashboard is protected by a password stored in `config.json` under the `password` field. The default value is `admin`.
+
+<Warning>
+  Change the default password before exposing the bridge on any network other than localhost. An attacker with dashboard access can read and replace your LMArena auth tokens and API keys. Update the password in the dashboard settings or by editing `config.json` directly:
+
+  ```json
+  {
+    "password": "your-strong-password-here"
+  }
+  ```
+</Warning>

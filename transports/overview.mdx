@@ -1,0 +1,60 @@
+---
+title: "Transport selection in LMArena Bridge"
+description: "LMArena Bridge automatically selects between four HTTP transports based on model type and anti-bot challenge state. Learn how selection works."
+---
+
+LMArena Bridge proxies every chat request through one of four transports. Selection is fully automatic — the bridge tracks challenge outcomes and switches transports when the current one starts failing.
+
+## The four transports
+
+| Transport | Function | Typical use case |
+|---|---|---|
+| **Direct httpx** | Standard async HTTP via `httpx.AsyncClient` | Most models under normal conditions |
+| **Chrome fetch** (`fetch_lmarena_stream_via_chrome`) | Headless Chrome/Edge via Playwright; executes `fetch()` in-page | Models that always require a real browser; reCAPTCHA v3 token minting |
+| **Camoufox fetch** (`fetch_lmarena_stream_via_camoufox`) | Firefox-based stealth browser; uses `main_world_eval=True` | Fallback when Chrome is blocked or failing |
+| **Userscript proxy** (`fetch_lmarena_stream_via_userscript_proxy`) | Long-poll queue served to a browser userscript or internal Camoufox worker | No auth token configured |
+
+## Selection logic
+
+The bridge follows these rules in order when selecting a transport for each request:
+
+<Steps>
+  <Step title="Check for strict-browser models">
+    If the requested model is in `STRICT_BROWSER_FETCH_MODELS` (`gemini-3-pro-grounding`, `gemini-exp-1206`), the bridge always uses Chrome fetch regardless of any other state.
+  </Step>
+  <Step title="Check for auth token">
+    If no auth token is present in `config.json`, the bridge prefers the userscript proxy transport. This allows anonymous use through a real browser tab.
+  </Step>
+  <Step title="Apply Chrome/Camoufox failure counters">
+    For all other requests, the bridge tracks consecutive reCAPTCHA validation failures per browser transport:
+    - After **2 or more** consecutive Chrome reCAPTCHA failures → switches to Camoufox
+    - After **2 or more** consecutive Camoufox failures → switches back to Chrome
+  </Step>
+  <Step title="Fall back to direct httpx">
+    When no browser transport is needed and an auth token is available, the bridge uses direct httpx.
+  </Step>
+</Steps>
+
+<Note>
+  Transport selection is automatic. You do not normally configure it. The only relevant `config.json` fields are the window mode keys (`chrome_fetch_window_mode`, `camoufox_fetch_window_mode`, `camoufox_proxy_window_mode`), which control whether browser windows are hidden or visible.
+</Note>
+
+## Periodic refresh
+
+The bridge runs `periodic_refresh_task()` on startup and then every 30 minutes in the background.
+
+| Constant | Value |
+|---|---|
+| `PERIODIC_REFRESH_INTERVAL_SECONDS` | `1800` (30 minutes) |
+
+During each refresh cycle, the bridge re-scrapes the LMArena page to discover updated reCAPTCHA sitekeys and actions, re-fetches the models list, and optionally mints a fresh reCAPTCHA v3 token. This keeps the bridge functional after LMArena deploys configuration changes.
+
+<Tip>
+  If you notice persistent `recaptcha validation failed` errors, trigger a manual refresh from the `/dashboard` admin UI rather than restarting the server.
+</Tip>
+
+## Related pages
+
+- [Chrome and Camoufox browser transports](/transports/chrome-camoufox)
+- [Userscript proxy transport](/transports/userscript-proxy)
+- [reCAPTCHA and Cloudflare challenge handling](/transports/recaptcha-cloudflare)

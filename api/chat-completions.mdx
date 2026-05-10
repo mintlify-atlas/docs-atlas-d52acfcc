@@ -1,0 +1,214 @@
+---
+title: "Chat completions — POST /api/v1/chat/completions"
+description: "Send a chat completion request to any LMArena model. Supports streaming via SSE, multi-turn conversations, and image inputs for vision models."
+---
+
+The `/api/v1/chat/completions` endpoint is the primary way to send messages to LMArena models through the bridge. It follows the OpenAI Chat Completions format, so any client that works with OpenAI's API can be pointed at LMArena Bridge with minimal changes.
+
+## Authentication
+
+<ParamField header="Authorization" type="string" required>
+  Bearer token. Pass the API key you created in the dashboard: `Authorization: Bearer <api_key>`. If no API keys are configured on the bridge, pass an empty string or omit the header.
+</ParamField>
+
+## Request body
+
+<ParamField body="model" type="string" required>
+  The public model ID to use. Retrieve the current list of available IDs from [`GET /api/v1/models`](/api/models).
+</ParamField>
+
+<ParamField body="messages" type="object[]" required>
+  Array of message objects forming the conversation. Each object must have a `role` (`"system"`, `"user"`, or `"assistant"`) and a `content` field.
+
+  <Expandable title="message object properties">
+    <ResponseField name="role" type="string" required>
+      One of `"system"`, `"user"`, or `"assistant"`.
+    </ResponseField>
+    <ResponseField name="content" type="string | array" required>
+      The message text. For vision models, `content` may be an array of content blocks that include image data (base64 or URL).
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="stream" type="boolean" default="false">
+  When `true`, the response is returned as a Server-Sent Events stream. Each event carries a JSON delta; the stream ends with `data: [DONE]`.
+</ParamField>
+
+<ParamField body="temperature" type="number">
+  Sampling temperature. Passed through to LMArena when provided.
+</ParamField>
+
+<ParamField body="max_tokens" type="number">
+  Maximum number of tokens to generate. Passed through to LMArena when provided.
+</ParamField>
+
+## Multi-turn conversations
+
+The bridge maintains a chat session for each API key. When you send a sequence of messages that begins with the same first user message, the bridge routes follow-up turns to the same LMArena session automatically — you do not need to track a session ID yourself. The conversation key is derived from your API key, the model name, and the first user message.
+
+<Info>
+  If you change the model or the first user message, a new LMArena session is started. The bridge keeps all sessions in memory; restarting the server clears them.
+</Info>
+
+## Examples
+
+<CodeGroup>
+
+```bash Non-streaming
+curl -X POST http://localhost:8000/api/v1/chat/completions \
+  -H "Authorization: Bearer your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [
+      {"role": "user", "content": "Explain the difference between TCP and UDP."}
+    ]
+  }'
+```
+
+```bash Streaming
+curl -X POST http://localhost:8000/api/v1/chat/completions \
+  -H "Authorization: Bearer your_api_key" \
+  -H "Content-Type: application/json" \
+  --no-buffer \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [
+      {"role": "user", "content": "Write a haiku about distributed systems."}
+    ],
+    "stream": true
+  }'
+```
+
+```bash Multi-turn
+curl -X POST http://localhost:8000/api/v1/chat/completions \
+  -H "Authorization: Bearer your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [
+      {"role": "user", "content": "What is a Merkle tree?"},
+      {"role": "assistant", "content": "A Merkle tree is a hash tree where every leaf node contains ..."},
+      {"role": "user", "content": "How is it used in Git?"}
+    ]
+  }'
+```
+
+```bash Vision (image input)
+curl -X POST http://localhost:8000/api/v1/chat/completions \
+  -H "Authorization: Bearer your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "What is in this image?"},
+          {"type": "image_url", "image_url": {"url": "https://example.com/photo.jpg"}}
+        ]
+      }
+    ]
+  }'
+```
+
+</CodeGroup>
+
+## Responses
+
+### Non-streaming response
+
+```json 200
+{
+  "id": "chatcmpl-a1b2c3d4e5f6",
+  "object": "chat.completion",
+  "created": 1716000000,
+  "model": "gpt-4o",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "TCP provides reliable, ordered delivery with error checking, while UDP is connectionless and prioritises low latency over reliability."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 18,
+    "completion_tokens": 32,
+    "total_tokens": 50
+  }
+}
+```
+
+### Streaming response
+
+Each SSE event has the form `data: <json>\n\n`. The final event is `data: [DONE]`.
+
+```text SSE stream
+: keep-alive
+
+data: {"id":"chatcmpl-a1b2c3d4e5f6","object":"chat.completion.chunk","created":1716000000,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-a1b2c3d4e5f6","object":"chat.completion.chunk","created":1716000000,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"TCP"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-a1b2c3d4e5f6","object":"chat.completion.chunk","created":1716000000,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" provides"},"finish_reason":null}]}
+
+data: [DONE]
+```
+
+### Response fields
+
+<ResponseField name="id" type="string">
+  Unique identifier for this completion.
+</ResponseField>
+
+<ResponseField name="object" type="string">
+  Always `"chat.completion"` for non-streaming responses.
+</ResponseField>
+
+<ResponseField name="model" type="string">
+  The model that generated the response.
+</ResponseField>
+
+<ResponseField name="choices" type="object[]">
+  <Expandable title="choice object properties">
+    <ResponseField name="index" type="number">
+      Index of the choice (always `0`).
+    </ResponseField>
+    <ResponseField name="message" type="object">
+      The generated message with `role` and `content`.
+    </ResponseField>
+    <ResponseField name="finish_reason" type="string">
+      Why generation stopped. Typically `"stop"`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="usage" type="object">
+  Token usage counts: `prompt_tokens`, `completion_tokens`, `total_tokens`.
+</ResponseField>
+
+## Error responses
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid JSON, missing `model` or `messages`, empty messages array, or prompt exceeds the ~113,000 character limit. |
+| `401` | The `Authorization` header is missing or the API key is invalid. |
+| `403` | Attempted to use a stealth model (one without a public organisation). |
+| `404` | The requested model was not found. Check [`GET /api/v1/models`](/api/models) for valid IDs. |
+| `429` | Rate limit exceeded for your API key. |
+| `503` | LMArena is unavailable, the model list could not be fetched, or the bridge failed to acquire a reCAPTCHA token. |
+
+```json 401
+{
+  "detail": "Invalid API key"
+}
+```
+
+```json 400
+{
+  "detail": "Prompt too long (120000 characters). LMArena has a character limit of approximately 113567 characters. Please reduce the message size."
+}
+```

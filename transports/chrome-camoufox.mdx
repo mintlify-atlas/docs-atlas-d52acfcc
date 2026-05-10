@@ -1,0 +1,97 @@
+---
+title: "Chrome and Camoufox browser transports"
+description: "LMArena Bridge uses headless Chrome and Camoufox (Firefox-based) browsers to handle reCAPTCHA and Cloudflare challenges when direct HTTP fails."
+---
+
+When direct HTTP requests are blocked by reCAPTCHA or Cloudflare, the bridge falls back to executing the request inside a real browser using either Chrome or Camoufox. Both transports run `fetch()` in-page so that cookies, TLS fingerprints, and user-agent strings match what LMArena expects from a normal browser session.
+
+## Chrome transport
+
+The Chrome transport (`fetch_lmarena_stream_via_chrome`) uses [Playwright](https://playwright.dev/) to launch a persistent Chrome or Edge profile, navigate to `https://arena.ai/?mode=direct`, and execute a `fetch()` call inside the page context.
+
+**Key behaviors:**
+
+- Launches with `--disable-blink-features=AutomationControlled` to reduce bot-detection surface
+- Performs a short mouse-movement warm-up before sending the request to improve reCAPTCHA v3 scoring
+- Mints reCAPTCHA v3 tokens via `window.grecaptcha.enterprise.execute()` (or `window.grecaptcha.execute()` as fallback)
+- Falls back to reCAPTCHA v2 invisible widget when a v3 token is rejected with `recaptcha validation failed`
+- Persists cookies from each browser session back to `config.json`
+- Uses a persistent Chrome profile directory (`chrome_grecaptcha/`) so Cloudflare cookies accumulate across runs
+
+### Chrome executable discovery
+
+On **Windows**, the bridge checks the following paths in order:
+
+| Path |
+|---|
+| `C:\Program Files\Google\Chrome\Application\chrome.exe` |
+| `C:\Program Files (x86)\Google\Chrome\Application\chrome.exe` |
+| `C:\Program Files\Microsoft\Edge\Application\msedge.exe` |
+| `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe` |
+
+On **Linux and macOS**, Chrome is located via the system `PATH` (e.g. `google-chrome`, `chromium-browser`).
+
+<Warning>
+  The Chrome transport requires either Chrome or Edge to be installed. If neither is found, the bridge returns `None` and falls back to Camoufox or the userscript proxy.
+</Warning>
+
+## Camoufox transport
+
+The Camoufox transport (`fetch_lmarena_stream_via_camoufox`) uses [Camoufox](https://github.com/daijro/camoufox), a Firefox-based stealth browser, with `main_world_eval=True` enabled. This flag allows JavaScript injected via `page.evaluate()` to access `window.wrappedJSObject`, which is necessary to reach the page's `grecaptcha` instance in Firefox's privileged context.
+
+**Key behaviors:**
+
+- Navigates to `https://arena.ai/?mode=direct` and handles Cloudflare Turnstile challenges
+- Mints reCAPTCHA v3 tokens using a side-channel polling pattern (sets `window.__token_result` and polls every 500 ms) to work around Firefox's content script sandboxing
+- Falls back to reCAPTCHA v2 invisible widget on v3 rejection
+- Defaults to headless mode; override with `camoufox_fetch_headless: false` in `config.json`
+
+<Info>
+  Camoufox does not use a persistent profile by default, so Cloudflare cookies do not carry over between requests the way they do with the Chrome transport. This makes it slightly more likely to encounter Cloudflare challenges on first load.
+</Info>
+
+## Strict-browser models
+
+The following models always use Chrome fetch, regardless of reCAPTCHA failure counters or auth token state:
+
+| Model |
+|---|
+| `gemini-3-pro-grounding` |
+| `gemini-exp-1206` |
+
+These models are listed in `STRICT_BROWSER_FETCH_MODELS` in `constants.py`. They require an in-browser fetch to function correctly.
+
+## Automatic failover
+
+The bridge tracks consecutive reCAPTCHA validation failures per transport and switches automatically:
+
+| Condition | Action |
+|---|---|
+| 2+ consecutive Chrome reCAPTCHA failures | Switch to Camoufox |
+| 2+ consecutive Camoufox failures | Switch back to Chrome |
+
+This failover is transparent. No configuration is required.
+
+## Window modes
+
+Both transports support a `window_mode` setting that controls how the browser window appears during a fetch. The default in production is `hide`.
+
+| Mode | Behavior |
+|---|---|
+| `hide` (default) | Window is hidden |
+| `visible` | Window appears on screen — useful for debugging |
+| `minimize` | Window is minimized |
+| `offscreen` | Window is moved off-screen |
+
+Set the mode in `config.json`:
+
+```json config.json
+{
+  "chrome_fetch_window_mode": "hide",
+  "camoufox_fetch_window_mode": "hide"
+}
+```
+
+<Tip>
+  Set `"chrome_fetch_window_mode": "visible"` temporarily when debugging reCAPTCHA failures. You can watch the browser session in real time to see which challenge is blocking the request.
+</Tip>

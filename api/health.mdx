@@ -1,0 +1,103 @@
+---
+title: "GET /api/v1/health — bridge health check"
+description: "GET /api/v1/health returns bridge status, cf_clearance state, loaded model count, and API key presence. Returns HTTP 200 for all states — check the body."
+---
+
+The `/api/v1/health` endpoint reports whether the bridge is ready to serve requests. It checks three internal conditions and rolls them up into a single `status` string. Use this endpoint for uptime monitoring, load-balancer health probes, or quick diagnostics.
+
+## GET /api/v1/health
+
+**Authentication:** None required. The endpoint is always accessible.
+
+### Example request
+
+```bash cURL
+curl http://localhost:8000/api/v1/health
+```
+
+### Example responses
+
+<CodeGroup>
+
+```json Healthy
+{
+  "status": "healthy",
+  "timestamp": "2026-05-10T12:00:00.000000+00:00",
+  "checks": {
+    "cf_clearance": true,
+    "models_loaded": true,
+    "model_count": 42,
+    "api_keys_configured": true
+  }
+}
+```
+
+```json Degraded
+{
+  "status": "degraded",
+  "timestamp": "2026-05-10T12:00:00.000000+00:00",
+  "checks": {
+    "cf_clearance": false,
+    "models_loaded": true,
+    "model_count": 42,
+    "api_keys_configured": false
+  }
+}
+```
+
+```json Unhealthy
+{
+  "status": "unhealthy",
+  "timestamp": "2026-05-10T12:00:00.000000+00:00",
+  "error": "Failed to load config: [Errno 2] No such file or directory: 'config.json'"
+}
+```
+
+</CodeGroup>
+
+### Response fields
+
+<ResponseField name="status" type="string">
+  Overall bridge status. One of:
+
+  - `"healthy"` — Cloudflare clearance cookie is present **and** at least one model has been loaded.
+  - `"degraded"` — One of the above conditions is not met, but the bridge is still running.
+  - `"unhealthy"` — An exception occurred while reading the config or model list.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 UTC timestamp of when the health check ran.
+</ResponseField>
+
+<ResponseField name="checks" type="object">
+  Present when `status` is `"healthy"` or `"degraded"`.
+
+  <Expandable title="checks object properties">
+    <ResponseField name="cf_clearance" type="boolean">
+      Whether a valid Cloudflare clearance cookie (`cf_clearance`) is stored in the bridge config.
+    </ResponseField>
+    <ResponseField name="models_loaded" type="boolean">
+      Whether the bridge has fetched at least one model from LMArena.
+    </ResponseField>
+    <ResponseField name="model_count" type="number">
+      Total number of models currently loaded.
+    </ResponseField>
+    <ResponseField name="api_keys_configured" type="boolean">
+      Whether at least one API key is configured. When `false`, the bridge still accepts requests without a key.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Present only when `status` is `"unhealthy"`. Contains the exception message.
+</ResponseField>
+
+### HTTP status codes
+
+| Status | Meaning |
+|--------|---------|
+| `200` | The endpoint responded. Inspect `status` in the body to determine actual health — `200` is returned for `"healthy"`, `"degraded"`, and `"unhealthy"` alike. |
+
+<Warning>
+  The endpoint always returns HTTP `200`. Your monitoring tool should check the `status` field in the response body rather than relying on the HTTP status code alone.
+</Warning>

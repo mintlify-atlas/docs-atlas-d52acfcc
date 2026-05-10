@@ -1,0 +1,154 @@
+---
+title: "Browser window mode configuration"
+description: "Control how LMArena Bridge launches Chrome and Camoufox browser windows for anti-bot handling. Configure visible, hidden, or minimized window modes."
+---
+
+LMArena Bridge launches real browser instances to solve Cloudflare Turnstile challenges, mint reCAPTCHA tokens, and stream responses from LMArena. Three separate configuration fields control how each browser window appears on screen. In production all three default to `"hide"` so the bridge runs completely headless. During debugging you can switch individual windows to `"visible"` to watch exactly what the browser is doing.
+
+---
+
+## The three window mode settings
+
+| Config field | Browser process | Default |
+|---|---|---|
+| `camoufox_proxy_window_mode` | Camoufox — anonymous signup and Turnstile challenge solving | `"hide"` |
+| `camoufox_fetch_window_mode` | Camoufox — streaming fetch transport | `"hide"` |
+| `chrome_fetch_window_mode` | Chrome or Edge — streaming fetch transport | `"hide"` |
+
+Each field is independent. You can, for example, keep the Camoufox fetch window hidden while making the Chrome window visible to watch reCAPTCHA handling.
+
+---
+
+## Valid values
+
+All three fields accept the same set of values:
+
+<CodeGroup>
+
+```json Hide (default)
+{
+    "camoufox_proxy_window_mode": "hide",
+    "camoufox_fetch_window_mode": "hide",
+    "chrome_fetch_window_mode": "hide"
+}
+```
+
+```json Visible (debugging)
+{
+    "camoufox_proxy_window_mode": "visible",
+    "camoufox_fetch_window_mode": "visible",
+    "chrome_fetch_window_mode": "visible"
+}
+```
+
+```json Minimized
+{
+    "camoufox_proxy_window_mode": "minimize",
+    "camoufox_fetch_window_mode": "minimize",
+    "chrome_fetch_window_mode": "minimize"
+}
+```
+
+</CodeGroup>
+
+The full list of accepted strings:
+
+| Value | Aliases | Behaviour |
+|---|---|---|
+| `"hide"` | `"hidden"` | Window is not shown. Equivalent to headless mode for that process. |
+| `"minimize"` | `"minimized"` | Window is created and then immediately minimized to the taskbar. |
+| `"offscreen"` | `"off-screen"`, `"moveoffscreen"`, `"move-offscreen"` | Window is moved outside the visible screen area. |
+| `"visible"` | — | Window appears on screen at normal size. Use for debugging. |
+
+<Note>
+  The aliases (`"hidden"`, `"minimized"`, `"off-screen"`, etc.) are accepted
+  and treated as identical to their canonical forms. Prefer the canonical forms
+  (`"hide"`, `"minimize"`, `"offscreen"`, `"visible"`) for clarity.
+</Note>
+
+---
+
+## Which process does each setting control?
+
+### `camoufox_proxy_window_mode` — anonymous signup
+
+The **Camoufox proxy worker** is a singleton background browser that handles
+anonymous user signup on LMArena. It solves Cloudflare Turnstile challenges
+to obtain provisional user tokens. This window is only opened when the bridge
+needs to mint a new anonymous session, not on every request.
+
+### `camoufox_fetch_window_mode` — Camoufox transport
+
+The **Camoufox fetch transport** uses a Firefox-based Camoufox browser to
+execute `fetch()` calls directly inside the page. This transport is used as a
+fallback when Chrome-based reCAPTCHA solving fails repeatedly, or when
+Camoufox is explicitly selected for a request.
+
+### `chrome_fetch_window_mode` — Chrome transport
+
+The **Chrome fetch transport** uses a real Chrome or Edge browser via
+Playwright to execute `fetch()` in-page. This is the primary transport for
+models that require reCAPTCHA v3 token injection. On Windows the bridge looks
+for Chrome and Edge in the standard installation paths.
+
+---
+
+## When to use each value
+
+<Tabs>
+  <Tab title="Production">
+    Leave all three settings at the default `"hide"`. The bridge runs fully
+    headless and does not require a display server.
+
+    ```json
+    {
+        "camoufox_proxy_window_mode": "hide",
+        "camoufox_fetch_window_mode": "hide",
+        "chrome_fetch_window_mode": "hide"
+    }
+    ```
+  </Tab>
+  <Tab title="Debugging">
+    Set the window you want to inspect to `"visible"`. For example, to watch
+    Chrome handle a reCAPTCHA challenge:
+
+    ```json
+    {
+        "camoufox_proxy_window_mode": "hide",
+        "camoufox_fetch_window_mode": "hide",
+        "chrome_fetch_window_mode": "visible"
+    }
+    ```
+
+    <Warning>
+      Running with `"visible"` windows requires a graphical desktop
+      environment. On headless servers (e.g., a Linux VPS without a display)
+      the browser will fail to launch unless you configure a virtual display
+      such as Xvfb.
+    </Warning>
+  </Tab>
+  <Tab title="Minimized">
+    `"minimize"` is a middle ground: the window is created (which can help with
+    certain browser APIs that behave differently when fully hidden) but is kept
+    out of the way on the taskbar. Mostly useful on Windows desktops where
+    you want the bridge running without occupying screen space.
+
+    ```json
+    {
+        "camoufox_proxy_window_mode": "minimize",
+        "camoufox_fetch_window_mode": "minimize",
+        "chrome_fetch_window_mode": "minimize"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Applying changes
+
+Window mode settings are read each time a browser instance is launched.
+Changes to `config.json` take effect the next time that browser process is
+started — you do not need to restart the entire bridge server, but any
+already-running browser windows will continue using the mode they were
+launched with.

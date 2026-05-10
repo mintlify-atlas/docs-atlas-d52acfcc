@@ -1,0 +1,53 @@
+---
+title: "LMArena Bridge: OpenAI-compatible API for LMArena"
+description: "LMArena Bridge is a self-hosted server that exposes an OpenAI-compatible API for LMArena models, with automatic Cloudflare and reCAPTCHA handling."
+---
+
+LMArena Bridge is a self-hosted FastAPI server that lets you interact with LMArena models — including experimental stealth models — using the OpenAI API format. Point any OpenAI-compatible client, library, or UI at `http://localhost:8000/api/v1` and it works without any code changes.
+
+## What it does
+
+The bridge sits between your client and LMArena's internal API. It handles the hard parts automatically:
+
+- **Anti-bot challenges**: Cloudflare Turnstile, reCAPTCHA v3, and reCAPTCHA v2 are solved in the background using real browser automation
+- **Auth token management**: Rotates through multiple `arena-auth-prod-v1` tokens in round-robin, refreshing expired ones automatically
+- **Streaming**: Returns Server-Sent Events in OpenAI format — compatible with any SSE-capable client
+- **Image uploads**: Accepts base64-encoded images, uploads them to LMArena R2 storage, and includes signed URLs in the request
+
+## Architecture
+
+```
+Your client (curl / OpenWebUI / SDK)
+        │
+        │  POST /api/v1/chat/completions
+        ▼
+  LMArena Bridge (FastAPI, port 8000)
+        │
+        ├── Direct httpx  ──────────────────────► LMArena API
+        ├── Chrome fetch (Playwright)  ──────────► LMArena API
+        ├── Camoufox fetch (Firefox stealth)  ───► LMArena API
+        └── Userscript proxy (browser tab)  ─────► LMArena API
+```
+
+The bridge automatically selects the best transport based on the model and current challenge state.
+
+## Quick links
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install and make your first API call in minutes.
+  </Card>
+  <Card title="Authentication" icon="key" href="/authentication">
+    Get your LMArena token and configure API keys.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/chat-completions">
+    Full endpoint documentation.
+  </Card>
+  <Card title="Deployment" icon="server" href="/deployment/production">
+    Run in production with nginx and systemd.
+  </Card>
+</CardGroup>
+
+<Warning>
+  LMArena actively deploys Cloudflare checkpoints, captchas, and reCAPTCHA Enterprise protections. The bridge handles these automatically, but reliability may vary as LMArena updates its defenses.
+</Warning>

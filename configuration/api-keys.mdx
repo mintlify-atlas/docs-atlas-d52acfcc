@@ -1,0 +1,151 @@
+---
+title: "Manage API keys in LMArena Bridge"
+description: "Create, rotate, and delete API keys for client authentication. Set per-key rate limits in requests per minute via the dashboard or config.json."
+---
+
+API keys let you authenticate clients that call the bridge's OpenAI-compatible endpoint. Each key is independent: it has its own name, secret value, rate limit, and usage counter visible in the dashboard. You can create as many keys as you need — one per application, per user, or per environment.
+
+## How clients use API keys
+
+Clients send the key in the standard `Authorization` header:
+
+```http
+POST /api/v1/chat/completions HTTP/1.1
+Host: localhost:8000
+Authorization: Bearer sk-abc123def456
+Content-Type: application/json
+```
+
+This is identical to how OpenAI API keys are used, so any OpenAI-compatible client works without modification.
+
+---
+
+## Key structure
+
+Each entry in the `api_keys` array has four fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Human-readable label shown in the dashboard. |
+| `key` | string | The secret bearer token. Auto-generated when created via the dashboard. |
+| `rpm` | integer | Requests per minute allowed for this key. Defaults to `60`. |
+| `created` | integer | Unix timestamp (seconds) when the key was created. |
+
+The rate limiter uses a rolling `60`-second window (`RATE_LIMIT_WINDOW_SECONDS = 60`). When a key exceeds its `rpm` limit within that window, the bridge returns `429 Too Many Requests`.
+
+```json
+"api_keys": [
+    {
+        "name": "Production App",
+        "key": "sk-abc123def456",
+        "rpm": 120,
+        "created": 1717200000
+    },
+    {
+        "name": "Dev / Testing",
+        "key": "sk-xyz789",
+        "rpm": 10,
+        "created": 1717200001
+    }
+]
+```
+
+---
+
+## Creating keys
+
+<Tabs>
+  <Tab title="Dashboard">
+    1. Open the dashboard at `http://localhost:8000/dashboard` and log in.
+    2. Find the **API Keys** section.
+    3. Enter a name for the new key and click **Create Key**.
+    4. The dashboard sends `POST /create-key` with the name, generates a random
+       key value, and immediately saves it to `config.json`.
+    5. Copy the generated key — it is shown once on creation.
+
+    <Note>
+      The key value is a securely generated random string. You cannot
+      choose your own value through the dashboard; edit `config.json` directly
+      if you need a specific value.
+    </Note>
+  </Tab>
+  <Tab title="config.json">
+    Add an entry to the `api_keys` array manually while the server is stopped:
+
+    ```json
+    {
+        "api_keys": [
+            {
+                "name": "My Key",
+                "key": "sk-your-secret-value",
+                "rpm": 60,
+                "created": 1717200000
+            }
+        ]
+    }
+    ```
+
+    Restart the server. The entry is validated on load: if `key` is missing the
+    entry is silently dropped; missing `name`, `rpm`, or `created` fields are
+    filled with defaults.
+  </Tab>
+</Tabs>
+
+---
+
+## Deleting keys
+
+<Tabs>
+  <Tab title="Dashboard">
+    1. Open the **API Keys** section in the dashboard.
+    2. Click **Delete** next to the key you want to remove.
+    3. The dashboard sends `POST /delete-key` and the entry is removed from
+       `config.json` immediately.
+  </Tab>
+  <Tab title="config.json">
+    Remove the corresponding object from the `api_keys` array while the server
+    is stopped, then restart.
+  </Tab>
+</Tabs>
+
+---
+
+## Rotating keys
+
+There is no built-in rotation endpoint. To rotate a key:
+
+1. Create a new key via the dashboard or `config.json`.
+2. Update your clients to use the new key.
+3. Delete the old key once traffic has migrated.
+
+---
+
+## Rate limits
+
+Each key enforces its own request rate independently. The default limit is
+**60 requests per minute**, controlled by two constants in the bridge:
+
+```python
+DEFAULT_RATE_LIMIT_RPM = 60        # default rpm for new keys
+RATE_LIMIT_WINDOW_SECONDS = 60     # rolling window length
+```
+
+To change the rate limit for a specific key, either edit the `rpm` field in
+`config.json` or use the dashboard. Changes take effect on the next request
+without a server restart.
+
+<Warning>
+  Setting `rpm` to `0` effectively blocks the key. Make sure to set a positive
+  integer value for any key you intend to use.
+</Warning>
+
+---
+
+## Usage statistics
+
+Per-key request counts are stored in the `usage_stats` field of `config.json`
+and are visible in the dashboard. The dashboard shows the total request count
+and top models used per key.
+
+To reset counters, set `"usage_stats": {}` in `config.json` while the server
+is stopped, then restart.

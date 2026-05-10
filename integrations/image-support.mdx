@@ -1,0 +1,90 @@
+---
+title: "Send images to vision models via LMArena Bridge"
+description: "LMArena Bridge supports sending images to vision-capable LMArena models. Images are uploaded to R2 storage automatically from base64 content."
+---
+
+LMArena Bridge supports multimodal requests by automatically handling image uploads on your behalf. When you send a message containing a base64-encoded image to a vision-capable model, the bridge validates the image, uploads it to LMArena's R2 storage, and includes a signed URL in the request — all transparently through the standard OpenAI message format.
+
+## Supported formats and limits
+
+| Property | Value |
+|---|---|
+| Maximum file size | 10 MB (`MAX_IMAGE_SIZE_BYTES`) |
+| Supported MIME types | `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/svg+xml` |
+
+## How to send an image
+
+Pass images as base64-encoded data URLs inside the `content` array of a user message, following the OpenAI vision format.
+
+<CodeGroup>
+
+```json Request body
+{
+  "model": "gpt-4o",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "What's in this image?"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/png;base64,..."
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</CodeGroup>
+
+## What the bridge does automatically
+
+When the bridge receives a message with an image, it performs these steps in order:
+
+<Steps>
+  <Step title="Validate MIME type and size">
+    The bridge checks that the image's MIME type is in `SUPPORTED_IMAGE_MIME_TYPES` and that the file does not exceed `MAX_IMAGE_SIZE_BYTES` (10 MB). Invalid images are rejected before any upload is attempted.
+  </Step>
+
+  <Step title="Check the MD5 cache">
+    The bridge computes an MD5 hash of the image bytes and checks an in-memory cache. If a valid (non-expired) signed URL exists for that hash, the cached URL is reused and no upload occurs.
+  </Step>
+
+  <Step title="Upload to LMArena R2 storage">
+    If the image is not cached, the bridge requests a pre-signed upload URL from LMArena, uploads the raw bytes to R2 storage, and then requests a signed download URL.
+  </Step>
+
+  <Step title="Cache the result">
+    The returned signed URL and its expiry are stored in the in-memory cache keyed by MD5 hash. Subsequent requests with the same image bytes skip the upload until the URL expires.
+  </Step>
+
+  <Step title="Include the signed URL in the LMArena request">
+    The signed download URL is substituted into the request payload sent to LMArena, replacing the original base64 data URL.
+  </Step>
+</Steps>
+
+## MD5 caching
+
+The bridge caches uploaded images by their MD5 hash to avoid redundant uploads. The cache holds up to 1,000 entries; when full, the oldest 100 entries are evicted. A cached entry is considered valid as long as its signed URL has not expired (with a 60-second margin).
+
+<Note>
+  Sending the same image multiple times within a session will only result in a single upload, provided the signed URL has not expired.
+</Note>
+
+## Error handling
+
+The bridge includes built-in resilience for image upload failures:
+
+- Upload failures are logged with contextual debug information.
+- Timeout handling is applied to both the upload request (60 s) and the signed URL request (30 s).
+- HTTP errors from R2 storage are caught and logged; the request fails gracefully rather than crashing.
+
+<Warning>
+  If `next_action_upload` or `next_action_signed_url` are not present in `config.json`, image uploads will fail immediately. Refresh these values from the LMArena dashboard to restore image support.
+</Warning>

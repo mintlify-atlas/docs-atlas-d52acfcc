@@ -1,0 +1,94 @@
+---
+title: "reCAPTCHA and Cloudflare challenge handling"
+description: "LMArena Bridge automatically mints reCAPTCHA v3 and v2 tokens and solves Cloudflare Turnstile challenges using browser automation."
+---
+
+LMArena uses reCAPTCHA Enterprise (v3 and v2) to gate chat submissions and Cloudflare Turnstile to protect its anonymous signup flow. The bridge handles all of this automatically through its browser transports.
+
+## Challenge types
+
+| Challenge | Where it appears | How the bridge solves it |
+|---|---|---|
+| reCAPTCHA v3 | Every chat submission | Mints a token via `grecaptcha.enterprise.execute()` in a live browser page |
+| reCAPTCHA v2 (invisible) | When v3 score is rejected | Renders an invisible v2 widget and mints a token via `grecaptcha.enterprise.render()` |
+| Cloudflare Turnstile | Anonymous signup (`/nextjs-api/sign-up`) | Renders a Turnstile widget, polls for token, then calls signup |
+| Cloudflare "Just a moment" | Initial page load | Calls `click_turnstile()` and waits for the challenge to clear |
+
+## reCAPTCHA sitekeys
+
+| Constant | Value | Purpose |
+|---|---|---|
+| `RECAPTCHA_SITEKEY` | `6Led_uYrAAAAAIP_9E8Ais_67Z6Vp4vdf40p8SQU` | Default v3 sitekey for `chat_submit` action |
+| `RECAPTCHA_V2_SITEKEY` | `6Ld7ePYrAAAAAB34ovoFoDau1fqCJ6IyOjFEQaMn` | v2 sitekey used when v3 scoring fails |
+| `TURNSTILE_SITEKEY` | `0x4AAAAAAA65vWDmG-O_lPtT` | Cloudflare Turnstile for anonymous signup |
+| `RECAPTCHA_ACTION` | `chat_submit` | Default action name sent with every v3 token |
+
+<Note>
+  The sitekey and action are re-discovered dynamically on startup and every 30 minutes via `get_initial_data()`. The constants above are the fallback defaults used when scraping fails. If LMArena rotates its sitekey, the bridge will pick up the new value automatically after the next refresh.
+</Note>
+
+## Token caching
+
+reCAPTCHA v3 tokens are valid for approximately 2 minutes. The bridge caches the most recently minted token and reuses it across requests to avoid launching a browser session for every call.
+
+| Constant | Value | Description |
+|---|---|---|
+| `RECAPTCHA_TOKEN_EXPIRY_SECONDS` | `115 s` | Cached token lifetime (5 s safety margin before the 120 s Google limit) |
+| `RECAPTCHA_V3_TOKEN_LIFETIME_SECONDS` | `115 s` | Same value, used in the minting path |
+
+When the cached token is within expiry, the bridge returns it immediately from `get_cached_recaptcha_token()`. When it is expired or missing, the bridge mints a new one via `refresh_recaptcha_token()`.
+
+## Startup discovery
+
+On startup, the bridge calls `get_initial_data()`, which launches a Camoufox browser session to:
+
+<Steps>
+  <Step title="Scrape LMArena JavaScript">
+    Parses the LMArena page JavaScript to extract the current reCAPTCHA sitekey and action using regex patterns. Falls back to the constants above if scraping fails.
+  </Step>
+  <Step title="Discover the Supabase anon key">
+    Finds the Supabase JWT embedded in the page bundle. Used for auth token refresh via Supabase.
+  </Step>
+  <Step title="Fetch models and action IDs">
+    Retrieves the available model list and LMArena arena action identifiers.
+  </Step>
+  <Step title="Mint an initial reCAPTCHA v3 token">
+    Optionally mints and caches a token so the first request can be served immediately without waiting for a browser launch.
+  </Step>
+</Steps>
+
+`periodic_refresh_task()` repeats this cycle every `PERIODIC_REFRESH_INTERVAL_SECONDS` (1800 s / 30 minutes).
+
+## Token flow per request
+
+When the Chrome or Camoufox transport sends a request:
+
+1. The transport mints a fresh reCAPTCHA v3 token using `grecaptcha.enterprise.execute(sitekey, { action })`.
+2. The token is added to the request payload as `recaptchaV3Token` and to the request headers as `X-Recaptcha-Token` / `X-Recaptcha-Action`.
+3. If LMArena returns `403` with `{"error": "recaptcha validation failed"}`, the transport retries up to `max_recaptcha_attempts` (default: 3) times.
+4. On the first retry, the transport attempts to mint a reCAPTCHA v2 invisible token and substitutes it for the v3 token.
+5. If all attempts fail, the bridge returns the error response to the caller and increments the transport failure counter.
+
+After **2 or more** consecutive failures on a transport, the bridge switches to the other browser transport (Chrome → Camoufox or Camoufox → Chrome).
+
+## Cloudflare `cf_clearance` cookie
+
+The `cf_clearance` cookie proves that a browser has solved a Cloudflare challenge. If you have a valid one from a recent manual browser session, you can set it in `config.json` to improve reliability:
+
+```json config.json
+{
+  "cf_clearance": "your-cf-clearance-value-here"
+}
+```
+
+<Info>
+  The bridge prefers cookies already present in the persistent Chrome profile over values from `config.json`, to avoid overwriting a valid Cloudflare cookie with a stale one from a different browser fingerprint. The `config.json` value is only injected when the profile does not already have one.
+</Info>
+
+## LMArena crackdowns
+
+LMArena actively updates its anti-bot defenses. When it deploys a new Cloudflare ruleset or rotates reCAPTCHA configuration, the bridge may begin seeing elevated failure rates until the next 30-minute refresh cycle picks up the new parameters.
+
+<Warning>
+  Persistent failures after a 30-minute refresh cycle usually indicate a new Cloudflare ruleset that requires an updated `cf_clearance` cookie from a real browser, or a change to the reCAPTCHA sitekey that the scraper cannot extract automatically. Check the bridge logs for `recaptcha validation failed` or Cloudflare `403` responses and update `cf_clearance` manually if needed.
+</Warning>

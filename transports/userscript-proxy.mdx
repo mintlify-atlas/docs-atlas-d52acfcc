@@ -1,0 +1,113 @@
+---
+title: "Userscript proxy transport for LMArena Bridge"
+description: "The userscript proxy uses a browser extension or userscript to perform fetches in a real browser tab. Useful when no auth token is configured."
+---
+
+The userscript proxy is a two-sided long-poll system that delegates the actual HTTP fetch to a real browser tab, either one controlled by a user-installed userscript or by the bridge's own internal Camoufox background worker.
+
+## When it is used
+
+The userscript proxy is preferred when **no auth token is configured** in `config.json`. In this mode the bridge has no `arena-auth-prod-v1` cookie to inject, so it relies on the browser tab's own authenticated session or on anonymous signup via Turnstile.
+
+<Note>
+  The external userscript is optional. Even without it, the bridge starts an internal `camoufox_proxy_worker` automatically that acts as the proxy client.
+</Note>
+
+## How it works
+
+The system has two sides that communicate through the bridge server:
+
+**Poll side** — A browser tab (userscript or internal Camoufox worker) repeatedly asks the bridge for pending fetch jobs:
+
+```
+POST /api/v1/userscript/poll
+```
+
+The request blocks for up to `DEFAULT_USERSCRIPT_PROXY_POLL_TIMEOUT_SECONDS` seconds. If a job is queued before the timeout, the bridge returns it immediately. If nothing arrives, the browser retries.
+
+**Push side** — After the browser tab completes the upstream fetch, it streams response chunks back:
+
+```
+POST /api/v1/userscript/push
+```
+
+Each push payload contains response lines, status code, headers, and a `done` flag. The bridge accumulates these into an `asyncio.Queue` and streams them to the waiting API caller.
+
+### Job lifecycle
+
+```
+queued → picked_up → upstream_started → upstream_fetch_started → done
+```
+
+Each job carries monotonic timestamps for each phase transition so the bridge can apply per-phase timeouts correctly.
+
+## Timing constants
+
+| Constant | Value | Description |
+|---|---|---|
+| `DEFAULT_USERSCRIPT_PROXY_POLL_TIMEOUT_SECONDS` | `25 s` | How long the browser tab waits for a job before retrying |
+| `DEFAULT_USERSCRIPT_PROXY_JOB_TTL_SECONDS` | `90 s` | Time before a completed or abandoned job is cleaned up |
+| `USERSCRIPT_PROXY_JOB_TTL_MAX_SECONDS` | `600 s` | Maximum configurable job TTL |
+| `USERSCRIPT_PROXY_ACTIVE_WINDOW_BUFFER_SECONDS` | `10 s` | Buffer added to poll timeout when computing the proxy "active" window |
+
+The bridge considers the proxy **active** when the last poll or push happened within `poll_timeout + active_window_buffer` seconds. If the proxy has not polled recently, the bridge routes requests through a browser transport instead.
+
+## The `camoufox_proxy_worker`
+
+The bridge starts a singleton `camoufox_proxy_worker` background task automatically. This worker:
+
+<Steps>
+  <Step title="Launches a persistent Camoufox browser">
+    Opens a Camoufox (Firefox-based) browser and navigates to `https://arena.ai/?mode=direct`. The browser runs with `main_world_eval=True` so it can access `window.wrappedJSObject` for reCAPTCHA token minting.
+  </Step>
+  <Step title="Handles Cloudflare challenges">
+    Detects the "Just a moment" Cloudflare challenge page and calls `click_turnstile()` to resolve it before proceeding.
+  </Step>
+  <Step title="Performs anonymous signup if needed">
+    If no `arena-auth-prod-v1` cookie is present, renders a Cloudflare Turnstile widget (`TURNSTILE_SITEKEY = "0x4AAAAAAA65vWDmG-O_lPtT"`), waits for the user to solve it (or for it to auto-solve), and calls the LMArena anonymous signup endpoint. The resulting auth token is injected as a cookie.
+  </Step>
+  <Step title="Polls for and executes jobs">
+    Dequeues job IDs from the internal `_USERSCRIPT_PROXY_QUEUE`, injects the required `arena-auth-prod-v1` cookie, and executes the upstream fetch from inside the browser page. Response lines are pushed back via `push_proxy_chunk()`.
+  </Step>
+  <Step title="Recovers from failures">
+    If the browser page closes or the context becomes unavailable, the worker relaunches the browser and re-navigates on the next loop iteration.
+  </Step>
+</Steps>
+
+The worker uses `camoufox_proxy_window_mode` from `config.json` to control browser visibility:
+
+```json config.json
+{
+  "camoufox_proxy_window_mode": "hide"
+}
+```
+
+## Optional secret authentication
+
+If you expose the proxy endpoints publicly, you can protect them with a shared secret:
+
+```json config.json
+{
+  "userscript_proxy_secret": "your-secret-here"
+}
+```
+
+The bridge checks the `X-LMBridge-Secret` header on every poll and push request. Requests without a matching secret receive a `401 Unauthorized` response.
+
+<Warning>
+  Do not expose `/api/v1/userscript/poll` or `/api/v1/userscript/push` on a public network without setting `userscript_proxy_secret`. Anyone with access to these endpoints can inject arbitrary response data into ongoing requests.
+</Warning>
+
+## Configurable TTL
+
+The job TTL is configurable per deployment. Values outside the allowed range are clamped:
+
+```json config.json
+{
+  "userscript_proxy_job_ttl_seconds": 90
+}
+```
+
+| Minimum | Maximum |
+|---|---|
+| `10 s` | `600 s` |

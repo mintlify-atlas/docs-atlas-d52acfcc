@@ -1,28 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "LMArena Bridge",
+  "projectType": "api-service",
+  "projectName": "LMArena Bridge",
+  "projectDescription": "An OpenAI-compatible API server that proxies requests to LMArena models, handling Cloudflare/reCAPTCHA challenges through browser automation.",
   "theme": "luma",
-  "colors": {
-    "primary": "#040404",
-    "light": "#5454fc",
-    "dark": "#040404"
-  },
-  "favicon": "https://media.brand.dev/f3532977-88ea-441c-b58c-66feb74667bb.png",
-  "logo": {
-    "light": "https://media.brand.dev/9420ca86-179a-44a7-ba6b-65459333413f.svg",
-    "dark": "https://media.brand.dev/9420ca86-179a-44a7-ba6b-65459333413f.svg"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/cloudwaddie/lmarenabridge"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/cloudwaddie/lmarenabridge"
-    }
-  },
+  "primaryColor": "#040404",
+  "lightColor": "#5454fc",
+  "darkColor": null,
   "navigation": {
     "tabs": [
       {
@@ -93,5 +76,31 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "OpenAI-compatible /api/v1/chat/completions endpoint",
+    "Multi-transport: direct httpx, Chrome fetch, Camoufox (Firefox), userscript proxy",
+    "Automatic Cloudflare/reCAPTCHA v3 and v2 challenge handling via browser automation",
+    "Round-robin auth token management with auto-refresh via Supabase",
+    "Admin dashboard with usage stats, API key management, and token cycling",
+    "Image upload support to LMArena R2 storage (up to 10MB)",
+    "Rate limiting per API key with configurable RPM",
+    "Stealth model support including experimental models",
+    "Streaming responses (SSE) with OpenAI-compatible format",
+    "Periodic background refresh of models and reCAPTCHA tokens every 30 minutes"
+  ],
+  "publicApiSurface": [
+    "POST /api/v1/chat/completions",
+    "GET /api/v1/models",
+    "GET /api/v1/health",
+    "POST /api/v1/messages",
+    "POST /api/v1/userscript/poll",
+    "POST /api/v1/userscript/push",
+    "GET /dashboard",
+    "POST /add-auth-token",
+    "POST /delete-auth-token",
+    "POST /refresh-tokens",
+    "POST /create-key",
+    "POST /delete-key"
+  ]
 }

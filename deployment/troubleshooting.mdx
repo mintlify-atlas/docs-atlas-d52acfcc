@@ -1,0 +1,100 @@
+---
+title: "Troubleshoot common LMArena Bridge errors"
+description: "Solutions for the most common LMArena Bridge issues: auth token errors, image upload failures, timeout errors, and Cloudflare challenge problems."
+---
+
+The sections below cover the most common LMArena Bridge errors and how to resolve them. For any issue, enabling debug mode first (`DEBUG = True` in `src/constants.py`, then restart) will produce detailed logs that make it much easier to identify the cause.
+
+<Note>
+Enable debug mode to get detailed logs for any of the issues below. Set `DEBUG = True` in `src/constants.py`, then restart the bridge.
+</Note>
+
+<AccordionGroup>
+  <Accordion title='"LMArena API error: An error occurred"'>
+    This error usually means the bridge reached LMArena but received a generic failure response. The most common causes are an expired auth token or a stale Cloudflare cookie.
+
+    **Steps to resolve:**
+
+    1. Open the dashboard at `http://localhost:8000/dashboard`.
+    2. Remove the failing `arena-auth-prod-v1` token and add a fresh one. To get a new token, log in to LMArena in your browser, send a message, then copy the `arena-auth-prod-v1` cookie value from DevTools.
+    3. Check whether your `cf_clearance` cookie has expired. A new `cf_clearance` is issued each time you pass a Cloudflare challenge on LMArena. Copy the updated value into `config.json` or the dashboard.
+    4. Confirm the model you are requesting is still available on LMArena. Some models are removed or renamed without notice.
+
+    <Warning>
+    The `arena-auth-prod-v1` token starts with `base64-`. If it does not, you copied the wrong cookie.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Image upload failures">
+    Image uploads go directly to LMArena's R2 storage. Failures here are separate from the main API request.
+
+    **Steps to resolve:**
+
+    1. Verify the image is under **10 MB**. The limit is enforced before the upload attempt (`MAX_IMAGE_SIZE_BYTES` in `src/constants.py`).
+    2. Check that the MIME type is one of the supported types:
+       - `image/png`
+       - `image/jpeg`
+       - `image/gif`
+       - `image/webp`
+       - `image/svg+xml`
+    3. Confirm that LMArena R2 storage is reachable from your server. A network outage or firewall rule blocking outbound HTTPS to R2 endpoints will cause all uploads to fail.
+    4. If the upload URL itself is invalid, the `next_action_upload` and `next_action_signed_url` values in your config may be stale. Refresh your tokens from the dashboard to obtain new signed URLs.
+
+    <Note>
+    With debug mode on (`DEBUG = True` in `src/constants.py`), the bridge logs image upload progress and the full upload URL, making it easier to identify whether the failure is a size, MIME type, or network issue.
+    </Note>
+  </Accordion>
+
+  <Accordion title="Timeout errors">
+    The default request timeout is **120 seconds** (`DEFAULT_REQUEST_TIMEOUT` in `src/constants.py`). Requests that take longer than this are cancelled with a timeout error.
+
+    **Steps to resolve:**
+
+    1. For models that consistently produce long responses, increase the timeout by editing `DEFAULT_REQUEST_TIMEOUT` in `src/constants.py`.
+    2. Check basic network connectivity from your server to LMArena:
+       ```bash
+       curl -I https://arena.ai
+       ```
+    3. Switch the request to **streaming mode** (`"stream": true` in your API call). Streaming delivers tokens as they are generated, so the connection does not need to stay open for the full response duration before the client sees output.
+
+    <Warning>
+    Increasing the timeout too high can cause hung connections to accumulate. Start with increments of 30–60 seconds and monitor for connection buildup.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Token expiry and round-robin rotation">
+    `arena-auth-prod-v1` tokens expire over time. When all tokens are expired, every request will fail.
+
+    **Steps to resolve:**
+
+    1. Add multiple tokens to the dashboard. The bridge uses round-robin rotation across all configured tokens, so having several reduces the impact of any single token expiring.
+    2. Enable `prune_invalid_tokens` in `config.json`. This automatically removes tokens that fail validation, keeping the active pool clean.
+    3. Periodically refresh your tokens by revisiting LMArena in a browser, triggering a new session, and updating the token values in the dashboard.
+  </Accordion>
+
+  <Accordion title='Rate limit errors (HTTP 429)'>
+    A 429 response means a particular API key has exceeded its configured requests-per-minute (RPM) limit.
+
+    **Steps to resolve:**
+
+    1. Open the dashboard and increase the RPM limit for the relevant API key.
+    2. If the 429 is coming from LMArena itself (not the bridge), the upstream is throttling your auth token. Add more tokens to distribute the load.
+    3. Review your client application to ensure it is not sending bursts of requests. The bridge applies exponential backoff on upstream 429 responses, but the client will still see the error.
+
+    The default RPM for new API keys is `60` (`DEFAULT_RATE_LIMIT_RPM` in `src/constants.py`).
+  </Accordion>
+
+  <Accordion title="Cloudflare challenge problems">
+    LMArena uses Cloudflare protections including `cf_clearance` cookies, reCAPTCHA v3/v2, and Turnstile challenges. If any of these fail, the bridge cannot reach LMArena.
+
+    **Steps to resolve:**
+
+    1. Refresh the `cf_clearance` cookie. Open LMArena in a browser, complete any Cloudflare challenge, then copy the updated `cf_clearance` value into `config.json`.
+    2. If reCAPTCHA failures are frequent, the bridge will automatically fall back between Chrome and Camoufox transports. Check logs with debug mode on to see which transport is being used and whether it is succeeding.
+    3. If running headlessly on a server, ensure that a supported browser (Chrome/Edge or Camoufox) is installed and accessible. The bridge requires a real browser to solve reCAPTCHA and Turnstile challenges.
+
+    <Note>
+    The optional userscript proxy path can improve reCAPTCHA success rates in strict environments. See the README for setup details.
+    </Note>
+  </Accordion>
+</AccordionGroup>

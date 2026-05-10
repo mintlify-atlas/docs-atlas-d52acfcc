@@ -1,0 +1,65 @@
+---
+title: "Run LMArena Bridge in production"
+description: "Production configuration for LMArena Bridge: error handling, debug mode, monitoring key metrics, and security best practices for stable operation."
+---
+
+LMArena Bridge is designed for long-running production deployments. This page covers the built-in error handling pipeline, how to enable debug logging, which metrics to monitor, and the security steps you should take before exposing the bridge on a network.
+
+## Error handling
+
+LMArena Bridge includes comprehensive error handling for production use:
+
+| Category | What it covers |
+|---|---|
+| **Request validation** | JSON format, required fields, and data types |
+| **Model validation** | Model availability and access permissions |
+| **Image processing** | Image formats, sizes (max 10 MB), and MIME types |
+| **Upload failures** | Graceful handling of image upload failures with retry logic |
+| **Timeout handling** | Configurable timeouts for all HTTP requests (30–120 s) |
+| **Rate limiting** | Built-in rate limiting per API key |
+| **Error responses** | OpenAI-compatible error format for easy client integration |
+
+## Debug mode
+
+Debug mode is **off** by default in production. To enable it, set `DEBUG = True` in `src/constants.py`:
+
+```python src/constants.py
+# Set to True for detailed logging, False for minimal logging
+DEBUG = True
+```
+
+When debug mode is on, you will see:
+
+- Detailed request/response logs
+- Image upload progress
+- Model capability checks
+- Session management details
+
+<Warning>
+Keep debug mode off in production. It increases log verbosity and can reduce performance.
+</Warning>
+
+## Monitoring
+
+Track these key metrics in production:
+
+- **API response times** — slow responses indicate timeout issues
+- **Error rates** — track 4xx/5xx errors from `POST /api/v1/chat/completions`
+- **Model usage** — the dashboard shows the top 10 most-used models
+- **Image upload success** — monitor image upload failures in logs
+
+## Security best practices
+
+1. **API keys** — use strong, randomly generated keys; the dashboard auto-generates secure keys
+2. **Rate limiting** — configure appropriate requests-per-minute (RPM) per API key in the dashboard
+3. **Admin password** — change the default `admin` password in `config.json` or through the dashboard
+4. **HTTPS** — place a reverse proxy (nginx, Caddy) with SSL in front of the bridge; see [Configure a reverse proxy](/deployment/reverse-proxy)
+5. **Firewall** — restrict external access to port `8000`
+
+## Default values
+
+| Setting | Value | Source |
+|---|---|---|
+| Server port | `8000` | `PORT` in `src/constants.py` |
+| Request timeout | `120` seconds | `DEFAULT_REQUEST_TIMEOUT` in `src/constants.py` |
+| Default RPM | `60` requests per minute | `DEFAULT_RATE_LIMIT_RPM` in `src/constants.py` |

@@ -1,0 +1,65 @@
+---
+title: "Run LMArena Bridge as a systemd service"
+description: "Set up a systemd service unit to run LMArena Bridge automatically on boot, with restart on failure and proper environment configuration."
+---
+
+Running LMArena Bridge as a systemd service ensures it starts automatically on boot and restarts if it crashes.
+
+## Prerequisites
+
+Set up a Python virtual environment before creating the service unit:
+
+```bash
+python3 -m venv /path/to/venv
+/path/to/venv/bin/pip install -r requirements.txt
+```
+
+<Note>
+The service unit references the virtual environment's Python binary directly. This avoids system-level Python version conflicts and keeps dependencies isolated.
+</Note>
+
+## Create the service unit
+
+Create `/etc/systemd/system/lmarenabridge.service` with the following content:
+
+```ini /etc/systemd/system/lmarenabridge.service
+[Unit]
+Description=LMArena Bridge API
+After=network.target
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/path/to/lmarenabridge
+Environment="PATH=/path/to/venv/bin"
+ExecStart=/path/to/venv/bin/python -m src.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Replace `youruser`, `/path/to/lmarenabridge`, and `/path/to/venv` with the correct values for your system.
+
+`RestartSec=10` adds a 10-second delay between restart attempts, providing backoff on repeated failures and preventing a crash loop from hammering the system.
+
+## Enable and start the service
+
+```bash
+sudo systemctl enable lmarenabridge
+sudo systemctl start lmarenabridge
+sudo systemctl status lmarenabridge
+```
+
+- `enable` — registers the service to start on boot
+- `start` — starts the service immediately without a reboot
+- `status` — shows the current state and recent log lines
+
+## View logs
+
+```bash
+sudo journalctl -u lmarenabridge -f
+```
+
+The `-f` flag follows the log output in real time, equivalent to `tail -f`.

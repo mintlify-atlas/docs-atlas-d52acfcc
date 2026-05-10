@@ -1,0 +1,67 @@
+---
+title: "Configure a reverse proxy for LMArena Bridge"
+description: "Set up Nginx or Caddy as a reverse proxy in front of LMArena Bridge to enable HTTPS, custom domains, and streaming response support."
+---
+
+Run LMArena Bridge behind a reverse proxy in production to terminate SSL, expose a custom domain, and keep port `8000` off the public internet.
+
+## Why `proxy_buffering off` is required
+
+LMArena Bridge streams responses using [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). By default, nginx buffers the upstream response body before forwarding it to the client. With SSE, this means chunks are held in the buffer and never delivered until the stream ends — which breaks streaming entirely.
+
+Setting `proxy_buffering off` and `proxy_cache off` forces nginx to forward each chunk to the client as soon as it arrives from the upstream.
+
+<Warning>
+Omitting `proxy_buffering off` will cause streaming responses to appear frozen until the request completes. Always include both directives in your location block.
+</Warning>
+
+## Nginx
+
+Create a server block with SSL and the required streaming directives:
+
+```nginx /etc/nginx/sites-available/lmarenabridge
+server {
+    listen 443 ssl;
+    server_name api.yourdomain.com;
+    
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+    
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # For streaming responses
+        proxy_buffering off;
+        proxy_cache off;
+    }
+}
+```
+
+Enable the site and reload nginx:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/lmarenabridge /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+## Caddy
+
+Caddy handles SSL certificates automatically via Let's Encrypt. Add a block to your `Caddyfile`:
+
+```caddy Caddyfile
+api.yourdomain.com {
+    reverse_proxy localhost:8000 {
+        flush_interval -1
+    }
+}
+```
+
+The `flush_interval -1` directive tells Caddy to flush each response chunk immediately, which is equivalent to disabling buffering for SSE streams.
+
+<Note>
+Caddy provisions and renews TLS certificates automatically. No manual certificate management is needed.
+</Note>

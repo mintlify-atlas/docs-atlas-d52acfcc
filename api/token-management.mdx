@@ -1,0 +1,113 @@
+---
+title: "Manage LMArena auth tokens via the dashboard"
+description: "Add, delete, and refresh arena-auth-prod-v1 tokens in the LMArena Bridge dashboard. Covers round-robin rotation, expiry detection, and auto-refresh."
+---
+
+LMArena Bridge uses `arena-auth-prod-v1` JWT cookies to authenticate with LMArena on your behalf. The dashboard provides endpoints — consumed by the dashboard UI — for managing these tokens at runtime without restarting the bridge.
+
+## Dashboard token endpoints
+
+These endpoints are called by the dashboard UI and require an active dashboard session cookie.
+
+### Add a token
+
+```http
+POST /add-auth-token
+Content-Type: application/x-www-form-urlencoded
+
+token=base64-eyJ...
+```
+
+Appends a new token to the `auth_tokens` list in `config.json`. The token is validated before saving — malformed values are rejected.
+
+### Delete a token
+
+```http
+POST /delete-auth-token
+Content-Type: application/x-www-form-urlencoded
+
+token=base64-eyJ...
+```
+
+Removes the specified token from `auth_tokens`. The bridge stops using it immediately.
+
+### Refresh tokens
+
+```http
+POST /refresh-tokens
+```
+
+Triggers an immediate refresh attempt for all expired tokens in `auth_tokens`. The bridge tries two strategies in order:
+
+1. **LMArena HTTP refresh** — calls LMArena's auth refresh endpoint directly with the existing token
+2. **Supabase refresh** — uses the embedded Supabase anon key to mint a new session token
+
+<Info>
+  Refresh is only attempted for tokens that are within 60 seconds of expiry (`TOKEN_EXPIRY_SKEW_SECONDS = 60`). Valid tokens are left untouched.
+</Info>
+
+## Token lifecycle
+
+```
+arena-auth-prod-v1 cookie
+        │
+        ▼
+  Added to config.json auth_tokens
+        │
+        ▼
+  Round-robin selection (get_next_auth_token)
+        │
+        ├── Token valid → use for request
+        │
+        └── Token expired or missing
+                │
+                ├── try LMArena HTTP refresh
+                └── try Supabase refresh
+                        │
+                        ├── success → update config.json
+                        └── failure → skip token, try next
+```
+
+## Configuring token persistence
+
+By default (`persist_arena_auth_cookie: true` in `config.json`), the bridge saves any ephemeral auth token it discovers from a browser session back to `config.json`. Set this to `false` if you want to manage tokens exclusively through the dashboard.
+
+```json config.json
+{
+  "auth_tokens": [
+    "base64-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "base64-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  ],
+  "persist_arena_auth_cookie": true,
+  "prune_invalid_tokens": false
+}
+```
+
+<ParamField body="auth_tokens" type="string[]">
+  List of `arena-auth-prod-v1` cookie values. The bridge cycles through them in round-robin order, skipping any that are expired.
+</ParamField>
+
+<ParamField body="persist_arena_auth_cookie" type="boolean" default="true">
+  When `true`, any token captured from an in-browser session is written back to `config.json` automatically.
+</ParamField>
+
+<ParamField body="prune_invalid_tokens" type="boolean" default="false">
+  When `true`, expired tokens that cannot be refreshed are removed from `config.json` automatically.
+</ParamField>
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Use multiple tokens" icon="rotate">
+    Add at least two tokens. Round-robin rotation distributes load and keeps the bridge working while one token refreshes.
+  </Card>
+  <Card title="Enable prune_invalid_tokens" icon="trash">
+    Turn this on in production so expired, un-refreshable tokens don't accumulate in config.json.
+  </Card>
+  <Card title="Refresh proactively" icon="arrows-rotate">
+    Use the dashboard Refresh button periodically, especially after LMArena sessions expire overnight.
+  </Card>
+  <Card title="Change admin password" icon="lock">
+    Always change the default `admin` password before exposing the dashboard on any network.
+  </Card>
+</CardGroup>

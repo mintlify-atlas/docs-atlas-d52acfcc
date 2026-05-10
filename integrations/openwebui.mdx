@@ -1,0 +1,56 @@
+---
+title: "Connect LMArena Bridge to OpenWebUI"
+description: "Connect OpenWebUI to LMArena Bridge by setting the API base URL to http://localhost:8000/api/v1. Access all LMArena models through OpenWebUI's chat interface."
+---
+
+[OpenWebUI](https://openwebui.com/) is a user-friendly web interface for large language models. LMArena Bridge exposes an OpenAI-compatible API at `http://localhost:8000/api/v1`, which OpenWebUI can use as a connection backend to give you access to all LMArena models through a polished chat interface.
+
+## Connect OpenWebUI to LMArena Bridge
+
+<Steps>
+  <Step title="Start LMArena Bridge">
+    Make sure LMArena Bridge is running before opening OpenWebUI.
+
+    ```bash
+    python -m src.main
+    ```
+
+    The server starts on `http://localhost:8000`.
+  </Step>
+
+  <Step title="Open OpenWebUI in your browser">
+    Navigate to your OpenWebUI instance in a web browser.
+  </Step>
+
+  <Step title="Go to Admin Panel settings">
+    Open your **Profile**, then select **Admin Panel** → **Settings** → **Connections**.
+  </Step>
+
+  <Step title="Modify the OpenAI connection">
+    Locate the existing **OpenAI** connection entry and open it for editing.
+  </Step>
+
+  <Step title="Set the API base URL">
+    Set the **API Base URL** to:
+
+    ```
+    http://localhost:8000/api/v1
+    ```
+  </Step>
+
+  <Step title="Set the API key">
+    The **API Key** field can be left empty or set to any value. LMArena Bridge does not use this field for authentication unless you have configured API keys in the dashboard.
+  </Step>
+
+  <Step title="Save and select a model">
+    Save the connection. All LMArena models will appear in the model selector. Choose one and start chatting.
+  </Step>
+</Steps>
+
+<Note>
+  All models available on LMArena will appear in the OpenWebUI model list once the connection is saved.
+</Note>
+
+<Tip>
+  Always start LMArena Bridge before launching or using OpenWebUI. If OpenWebUI reports a connection error, confirm the bridge is running at `http://localhost:8000`.
+</Tip>
